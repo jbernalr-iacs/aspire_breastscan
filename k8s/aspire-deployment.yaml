@@ -84,6 +84,8 @@ metadata:
   namespace: aspire-tool
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
 spec:
   ingressClassName: nginx
   rules:
@@ -105,6 +107,8 @@ metadata:
   namespace: aspire-tool
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
 spec:
   ingressClassName: nginx
   rules:
@@ -125,10 +129,91 @@ spec:
             name: aspire-service
             port:
               number: 3000
-      - path: /.*\.(png|jpg|jpeg)$
+      - path: /[^/]+\.(png|jpg|jpeg|svg|ico)$
         pathType: ImplementationSpecific
         backend:
           service:
             name: aspire-service
             port:
               number: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: aspire-tool
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      containers:
+      - name: oauth2-proxy
+        image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+        args:
+        - --provider=keycloak-oidc
+        - --oidc-issuer-url=https://mini-node-iacs.bigan.eu/auth/realms/EUCAIM-NODE
+        - --redirect-url=https://mini-node-iacs.bigan.eu/oauth2/callback
+        - --email-domain=*
+        - --allowed-role=aspire-access
+        - --session-cookie-minimal=true
+        - --cookie-secure=true
+        - --cookie-samesite=lax
+        - --reverse-proxy=true
+        - --upstream=static://202
+        - --http-address=0.0.0.0:4180
+        env:
+        - name: OAUTH2_PROXY_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: aspire-auth-secret
+              key: client-id
+        - name: OAUTH2_PROXY_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: aspire-auth-secret
+              key: client-secret
+        - name: OAUTH2_PROXY_COOKIE_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: aspire-auth-secret
+              key: cookie-secret
+        ports:
+        - containerPort: 4180
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oauth2-proxy-service
+  namespace: aspire-tool
+spec:
+  selector:
+    app: oauth2-proxy
+  ports:
+    - protocol: TCP
+      port: 4180
+      targetPort: 4180
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oauth2-proxy-ingress
+  namespace: aspire-tool
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: mini-node-iacs.bigan.eu
+    http:
+      paths:
+      - path: /oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: oauth2-proxy-service
+            port:
+              number: 4180
