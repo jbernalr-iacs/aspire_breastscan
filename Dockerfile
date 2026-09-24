@@ -4,7 +4,7 @@ COPY gui_aspire ./
 RUN npm install
 RUN npm run build
 
-FROM mambaorg/micromamba:1.4.8-bullseye-slim
+FROM mambaorg/micromamba:bookworm-slim
 
 USER root
 
